@@ -1,0 +1,45 @@
+name: Anime Automation Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      anime_name:
+        description: 'Anime Name'
+        required: true
+      process_types:
+        description: 'Process Types (movie,ova,special,tv)'
+        required: true
+        default: 'movie,ova,special,tv'
+
+jobs:
+  process_anime:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 ffmpeg
+          pip install requests
+
+      - name: Run Anime Processor
+        env:
+          MANUS_API_KEY: ${{ secrets.MANUS_API_KEY }}
+        run: |
+          python main.py --anime "${{ github.event.inputs.anime_name }}" --types "${{ github.event.inputs.process_types }}"
+
+      - name: Commit and Push Changes
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add Anime/
+          git commit -m "Update tracking and state for ${{ github.event.inputs.anime_name }}" || echo "No changes to commit"
+          git push
