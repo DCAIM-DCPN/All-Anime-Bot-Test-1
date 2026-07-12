@@ -62,20 +62,28 @@ class AnimeProcessor:
         return None
 
     def search_torrents(self):
-        print(f"Searching Tsukihime API for torrents for: {self.anime_name}")
+        # Trim whitespace from anime name to avoid 422 errors
+        search_query = self.anime_name.strip()
+        print(f"Searching Tsukihime API for torrents for: {search_query}")
         all_torrents = []
-        page = 1
+        limit = 100
+        offset = 0
         while True:
             try:
-                response = requests.get(f"{TSUKIHIME_API_URL}/search/torrents", params={"query": self.anime_name, "page": page})
-                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                # The API uses 'q' for query and 'offset' for pagination
+                response = requests.get(f"{TSUKIHIME_API_URL}/search/torrents", params={"q": search_query, "limit": limit, "offset": offset})
+                response.raise_for_status()
                 data = response.json()
-                torrents = data.get("torrents", [])
-                if not torrents:
+                # Based on standard API behavior, the results might be in 'torrents' or just the root list
+                torrents = data.get("torrents", []) if isinstance(data, dict) else data
+                
+                if not torrents or not isinstance(torrents, list):
                     break
+                    
                 all_torrents.extend(torrents)
-                page += 1
-                if page > 10: # Safety limit to prevent excessive API calls
+                offset += limit
+                
+                if len(torrents) < limit or offset >= 1000: # Safety limit
                     break
             except requests.exceptions.RequestException as e:
                 print(f"Error during torrent search: {e}")
