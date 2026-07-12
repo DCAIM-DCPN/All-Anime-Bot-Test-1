@@ -352,10 +352,10 @@ Please perform the following actions:
         for torrent in ai_filtered_torrents:
             btih = torrent.get("btih")
             if not btih or btih in self.state["completed_torrents"]:
-                print(f"Skipping already completed or invalid torrent: {torrent.get("title")}")
+                print(f"Skipping already completed or invalid torrent: {torrent.get('title')}")
                 continue
             
-            print(f"Processing torrent: {torrent.get("title")}")
+            print(f"Processing torrent: {torrent.get('title')}")
             temp_download_dir = self.anime_local_path / "temp_download"
             temp_download_dir.mkdir(exist_ok=True)
 
