@@ -41,6 +41,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add bot_data/ # Track the bot_data directory for state management
+          mkdir -p bot_data
+          git add bot_data/
           git commit -m "Update tracking and state for ${{ github.event.inputs.anime_name }}" || echo "No changes to commit"
           git push
