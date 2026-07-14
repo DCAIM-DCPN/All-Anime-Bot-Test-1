@@ -74,8 +74,11 @@ class AnimeProcessor:
                 response = requests.get(f"{TSUKIHIME_API_URL}/search/torrents", params={"q": search_query, "limit": limit, "offset": offset})
                 response.raise_for_status()
                 data = response.json()
-                # Based on standard API behavior, the results might be in 'torrents' or just the root list
-                torrents = data.get("torrents", []) if isinstance(data, dict) else data
+                # The API returns results in a 'results' key
+                if isinstance(data, dict):
+                    torrents = data.get("results", [])
+                else:
+                    torrents = data
                 
                 if not torrents or not isinstance(torrents, list):
                     break
@@ -122,7 +125,8 @@ Please perform the following actions:
                 continue
             seen_btihs.add(btih)
 
-            title = torrent.get("title", "").lower()
+            # API uses 'name' for the torrent title
+            title = torrent.get("name", "").lower()
             magnet_link = f"magnet:?xt=urn:btih:{btih}"
             torrent["magnet_link"] = magnet_link
 
@@ -360,10 +364,10 @@ Please perform the following actions:
         for torrent in ai_filtered_torrents:
             btih = torrent.get("btih")
             if not btih or btih in self.state["completed_torrents"]:
-                print(f"Skipping already completed or invalid torrent: {torrent.get('title')}")
+                print(f"Skipping already completed or invalid torrent: {torrent.get('name')}")
                 continue
             
-            print(f"Processing torrent: {torrent.get('title')}")
+            print(f"Processing torrent: {torrent.get('name')}")
             temp_download_dir = self.anime_local_path / "temp_download"
             temp_download_dir.mkdir(exist_ok=True)
 
