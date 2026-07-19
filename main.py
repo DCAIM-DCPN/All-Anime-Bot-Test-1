@@ -188,10 +188,22 @@ Output ONLY the Python code for 'executor.py'."""
         executor_code = self.ask_manus_for_executor(raw_torrents)
         
         if executor_code:
-            with open("executor.py", "w") as f:
+            executor_path = BOT_WORKING_DIR / "executor.py"
+            with open(executor_path, "w") as f:
                 f.write(executor_code)
-            print("Successfully generated executor.py. Running it now...")
-            subprocess.run(["python", "executor.py"], check=True)
+            print(f"Successfully generated {executor_path}. Running it now...")
+            result = subprocess.run(
+                ["python", str(executor_path)],
+                capture_output=True,
+                text=True
+            )
+            print("=== executor.py stdout ===")
+            print(result.stdout)
+            if result.stderr:
+                print("=== executor.py stderr ===")
+                print(result.stderr)
+            if result.returncode != 0:
+                print(f"executor.py exited with code {result.returncode}")
         else:
             print("Failed to generate executor.py.")
 
