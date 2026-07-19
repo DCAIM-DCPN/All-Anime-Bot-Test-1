@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import subprocess
 import requests
 import argparse
 from pathlib import Path
@@ -69,45 +70,83 @@ Then, generate a Python script named 'executor.py' that:
 Output ONLY the Python code for 'executor.py'."""
 
         headers = {
-            "x-manus-api-key": MANUS_API_KEY,
+            "Authorization": f"Bearer {MANUS_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         data = {
-            "message": prompt,
-            "structured_output_schema": {
-                "type": "object",
-                "properties": {
-                    "executor_code": {"type": "string"}
-                },
-                "required": ["executor_code"]
-            }
+            "message": prompt
         }
-        
+
         try:
             # Step 1: Create a task
-            response = requests.post(f"{MANUS_API_URL}/task.create", headers=headers, json=data)
+            response = requests.post(f"{MANUS_API_URL}/tasks", headers=headers, json=data)
             response.raise_for_status()
-            task_id = response.json().get("task_id")
+            resp_json = response.json()
+            task_id = (
+                resp_json.get("task_id")
+                or resp_json.get("data", {}).get("task_id")
+                or resp_json.get("id")
+            )
+
+            if not task_id:
+                print(f"Unexpected response when creating Manus task: {json.dumps(resp_json, indent=2)}")
+                return None
+
             print(f"Manus task created: {task_id}")
-            
+
             # Step 2: Poll for completion
-            while True:
+            max_attempts = 60  # 10 minutes max wait
+            for attempt in range(max_attempts):
                 time.sleep(10)
-                status_response = requests.get(f"{MANUS_API_URL}/task.detail", headers=headers, params={"task_id": task_id})
+                status_response = requests.get(f"{MANUS_API_URL}/tasks/{task_id}", headers=headers)
                 status_response.raise_for_status()
-                task_detail = status_response.json().get("task_detail", {})
-                
-                if task_detail.get("status") == "stopped":
-                    result = task_detail.get("structured_output", {}).get("value", {})
-                    return result.get("executor_code")
-                elif task_detail.get("status") == "failed":
-                    print("Manus task failed.")
+                task_data = status_response.json()
+                task_detail = task_data.get("task") or task_data.get("data") or task_data
+
+                status = task_detail.get("status", "unknown")
+                print(f"Waiting for Manus... (Status: {status}, attempt {attempt + 1}/{max_attempts})")
+
+                if status in ("completed", "stopped", "done"):
+                    # Extract code from the result message
+                    result_msg = (
+                        task_detail.get("result")
+                        or task_detail.get("message")
+                        or task_detail.get("output", "")
+                    )
+                    if isinstance(result_msg, dict):
+                        result_msg = (
+                            result_msg.get("content")
+                            or result_msg.get("text")
+                            or result_msg.get("value", "")
+                        )
+
+                    if isinstance(result_msg, str) and "```python" in result_msg:
+                        # Extract code from markdown code block
+                        start = result_msg.index("```python") + len("```python")
+                        end = result_msg.index("```", start)
+                        return result_msg[start:end].strip()
+                    elif isinstance(result_msg, str) and "```" in result_msg:
+                        start = result_msg.index("```") + 3
+                        newline_pos = result_msg.index("\n", start)
+                        start = newline_pos + 1
+                        end = result_msg.index("```", start)
+                        return result_msg[start:end].strip()
+                    elif isinstance(result_msg, str):
+                        return result_msg.strip()
+
+                    print(f"Manus task completed but result format unexpected: {json.dumps(task_detail, indent=2)[:500]}")
                     return None
-                
-                print(f"Waiting for Manus... (Status: {task_detail.get('status')})")
+                elif status == "failed":
+                    print(f"Manus task failed: {task_detail.get('error', 'No error details')}")
+                    return None
+
+            print("Manus task timed out.")
+            return None
         except Exception as e:
             print(f"Error communicating with Manus API: {e}")
+            import traceback
+            traceback.print_exc()
         return None
 
     def run(self):
