@@ -70,7 +70,7 @@ Then, generate a Python script named 'executor.py' that:
 Output ONLY the Python code for 'executor.py'."""
 
         headers = {
-            "Authorization": f"Bearer {MANUS_API_KEY}",
+            "x-api-key": MANUS_API_KEY,
             "Content-Type": "application/json"
         }
 
