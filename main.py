@@ -9,7 +9,7 @@ from pathlib import Path
 # Constants
 RPMSHARE_API_KEY = "cba926e36ff510351f459f27"
 TSUKIHIME_API_URL = "https://api.tsukihime.org/v1"
-MANUS_API_URL = "https://api.manus.ai/v1"
+MANUS_API_URL = "https://api.manus.ai/v2"
 MANUS_API_KEY = os.getenv("MANUS_API_KEY")
 
 # Local working directory for the bot
@@ -70,76 +70,99 @@ Then, generate a Python script named 'executor.py' that:
 Output ONLY the Python code for 'executor.py'."""
 
         headers = {
-            "x-api-key": MANUS_API_KEY,
+            "x-manus-api-key": MANUS_API_KEY,
             "Content-Type": "application/json"
         }
 
         data = {
-            "message": prompt
+            "message": {"content": prompt},
+            "structured_output_schema": {
+                "type": "object",
+                "properties": {
+                    "executor_code": {"type": "string"}
+                },
+                "required": ["executor_code"],
+                "additionalProperties": False
+            }
         }
 
         try:
             # Step 1: Create a task
-            response = requests.post(f"{MANUS_API_URL}/tasks", headers=headers, json=data)
+            response = requests.post(f"{MANUS_API_URL}/task.create", headers=headers, json=data)
             response.raise_for_status()
             resp_json = response.json()
-            task_id = (
-                resp_json.get("task_id")
-                or resp_json.get("data", {}).get("task_id")
-                or resp_json.get("id")
-            )
 
+            if not resp_json.get("ok"):
+                error = resp_json.get("error", {})
+                print(f"Manus API error: {error.get('code', 'unknown')} - {error.get('message', 'no details')}")
+                return None
+
+            task_id = resp_json.get("task_id")
             if not task_id:
                 print(f"Unexpected response when creating Manus task: {json.dumps(resp_json, indent=2)}")
                 return None
 
             print(f"Manus task created: {task_id}")
 
-            # Step 2: Poll for completion
+            # Step 2: Poll for completion via task.listMessages
             max_attempts = 60  # 10 minutes max wait
             for attempt in range(max_attempts):
                 time.sleep(10)
-                status_response = requests.get(f"{MANUS_API_URL}/tasks/{task_id}", headers=headers)
+                status_response = requests.post(
+                    f"{MANUS_API_URL}/task.listMessages",
+                    headers=headers,
+                    json={"task_id": task_id}
+                )
                 status_response.raise_for_status()
-                task_data = status_response.json()
-                task_detail = task_data.get("task") or task_data.get("data") or task_data
+                msg_data = status_response.json()
 
-                status = task_detail.get("status", "unknown")
-                print(f"Waiting for Manus... (Status: {status}, attempt {attempt + 1}/{max_attempts})")
+                if not msg_data.get("ok"):
+                    error = msg_data.get("error", {})
+                    print(f"Manus listMessages error: {error.get('message', 'unknown')}")
+                    # Don't bail — could be a transient error, keep polling
+                    continue
 
-                if status in ("completed", "stopped", "done"):
-                    # Extract code from the result message
-                    result_msg = (
-                        task_detail.get("result")
-                        or task_detail.get("message")
-                        or task_detail.get("output", "")
-                    )
-                    if isinstance(result_msg, dict):
-                        result_msg = (
-                            result_msg.get("content")
-                            or result_msg.get("text")
-                            or result_msg.get("value", "")
-                        )
+                messages = msg_data.get("messages", [])
+                task_status = msg_data.get("status")
 
-                    if isinstance(result_msg, str) and "```python" in result_msg:
-                        # Extract code from markdown code block
-                        start = result_msg.index("```python") + len("```python")
-                        end = result_msg.index("```", start)
-                        return result_msg[start:end].strip()
-                    elif isinstance(result_msg, str) and "```" in result_msg:
-                        start = result_msg.index("```") + 3
-                        newline_pos = result_msg.index("\n", start)
-                        start = newline_pos + 1
-                        end = result_msg.index("```", start)
-                        return result_msg[start:end].strip()
-                    elif isinstance(result_msg, str):
-                        return result_msg.strip()
+                # Check if task has finished
+                if task_status in ("completed", "stopped", "done"):
+                    # Try structured output first (from the response or last message)
+                    structured = msg_data.get("structured_output") or msg_data.get("structured_output_value")
+                    if structured and isinstance(structured, dict):
+                        return structured.get("executor_code")
+                    if structured and isinstance(structured, str):
+                        return structured
 
-                    print(f"Manus task completed but result format unexpected: {json.dumps(task_detail, indent=2)[:500]}")
+                    # Fallback: extract code from the last message content
+                    if messages:
+                        last_msg = messages[-1]
+                        result_msg = last_msg.get("content", "")
+                        if isinstance(result_msg, list):
+                            result_msg = " ".join(
+                                part.get("text", "") for part in result_msg if part.get("type") == "text"
+                            )
+
+                        if isinstance(result_msg, str) and "```python" in result_msg:
+                            start = result_msg.index("```python") + len("```python")
+                            end = result_msg.index("```", start)
+                            return result_msg[start:end].strip()
+                        elif isinstance(result_msg, str) and "```" in result_msg:
+                            start = result_msg.index("```") + 3
+                            newline_pos = result_msg.index("\n", start)
+                            start = newline_pos + 1
+                            end = result_msg.index("```", start)
+                            return result_msg[start:end].strip()
+                        elif isinstance(result_msg, str):
+                            return result_msg.strip()
+
+                    print(f"Manus task completed but no code found in response.")
                     return None
-                elif status == "failed":
-                    print(f"Manus task failed: {task_detail.get('error', 'No error details')}")
+                elif task_status == "failed":
+                    print(f"Manus task failed.")
                     return None
+
+                print(f"Waiting for Manus... (Status: {task_status or 'running'}, messages: {len(messages)}, attempt {attempt + 1}/{max_attempts})")
 
             print("Manus task timed out.")
             return None
