@@ -1,4 +1,4 @@
-name: Anime Automation Bot
+name: Anime Automation Bot (Two-Step)
 
 on:
   workflow_dispatch:
@@ -6,14 +6,12 @@ on:
       anime_name:
         description: 'Anime Name'
         required: true
-      process_types:
-        description: 'Comma separated types (movie,ova,special,tv)'
-        required: false
-        default: ''
 
 jobs:
-  process_anime:
+  collect_torrents:
     runs-on: ubuntu-latest
+    outputs:
+      raw_torrents_json_path: ${{ steps.save_raw_torrents.outputs.path }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,23 +23,60 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y aria2 ffmpeg # ffmpeg includes ffprobe
           pip install requests
 
-      - name: Run Anime Processor
+      - name: Run Anime Collector
         env:
-          # MANUS_API_KEY is not directly used in main.py yet, but kept for future AI integration
+          RPMSHARE_API_KEY: ${{ secrets.RPMSHARE_API_KEY }}
           MANUS_API_KEY: ${{ secrets.MANUS_API_KEY }}
         run: |
-          python main.py --anime "${{ github.event.inputs.anime_name }}" --types "${{ github.event.inputs.process_types }}"
+          python main.py --anime "${{ github.event.inputs.anime_name }}"
 
-      - name: Commit and Push Changes
-        if: always()
+      - name: Upload Raw Torrents as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-torrents-data
+          path: bot_data/raw_torrents.json
+
+      - name: Save Raw Torrents Path for Manus
+        id: save_raw_torrents
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          mkdir -p bot_data
-          git add bot_data/
-          git commit -m "Update tracking and state for ${{ github.event.inputs.anime_name }}" || echo "No changes to commit"
-          git push
+          echo "path=bot_data/raw_torrents.json" >> "$GITHUB_OUTPUT"
+
+  # This job is a placeholder. In a real scenario, Manus would be invoked here
+  # to process the raw_torrents.json and generate the executor.py script.
+  # For now, the user will manually take the raw_torrents.json and ask Manus.
+  # The next step would be a separate workflow dispatch for running the executor.
+
+  # process_and_upload_anime:
+  #   needs: collect_torrents
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout Repository
+  #       uses: actions/checkout@v4
+  #     - name: Download Executor Script
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: executor-script
+  #         path: .
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.11'
+  #     - name: Install Dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y aria2 ffmpeg
+  #         pip install requests
+  #     - name: Run Anime Executor
+  #       run: |
+  #         python executor.py
+  #     - name: Commit and Push Changes
+  #       if: always()
+  #       run: |
+  #         git config --local user.email "action@github.com"
+  #         git config --local user.name "GitHub Action"
+  #         mkdir -p bot_data
+  #         git add bot_data/
+  #         git commit -m "Update tracking and state for ${{ github.event.inputs.anime_name }}" || echo "No changes to commit"
+  #         git push
